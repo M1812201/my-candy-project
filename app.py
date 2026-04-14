@@ -91,14 +91,6 @@ if "Division" in df.columns:
         df = df[df["Division"] == division]
 
 # Sales filter (ADDED ✅)
-#min_sales = st.sidebar.slider(
-    #"Minimum Sales",
-    #float(df["Sales"].min()),
-    #float(df["Sales"].max()),
-    #float(df["Sales"].min())
-#)
-#df = df[df["Sales"] >= min_sales]
-
 min_val = df["Sales"].min()
 max_val = df["Sales"].max()
 
