@@ -22,42 +22,58 @@ if uploaded_file is None:
 # -------------------------------
 # LOAD FILE
 # -------------------------------
-file_name = uploaded_file.name
-
-if file_name.endswith(".csv"):
+if uploaded_file.name.endswith(".csv"):
     df = pd.read_csv(uploaded_file)
+else:
+    df = pd.read_excel(uploaded_file, engine="openpyxl")
 
-elif file_name.endswith(".xlsx"):
-    xls = pd.ExcelFile(uploaded_file)
-    sheet_name = st.selectbox("Select Sheet", xls.sheet_names)
-    df = pd.read_excel(uploaded_file, sheet_name=sheet_name)
+# -------------------------------
+# CLEAN COLUMN NAMES (CRITICAL)
+# -------------------------------
+df.columns = df.columns.str.strip().str.lower()
+
+# -------------------------------
+# VALIDATE REQUIRED COLUMNS
+# -------------------------------
+required_cols = ["sales", "cost", "gross profit"]
+
+missing = [col for col in required_cols if col not in df.columns]
+
+if missing:
+    st.error(f"❌ Missing required columns: {missing}")
+    st.write("Available columns:", df.columns.tolist())
+    st.stop()
 
 # -------------------------------
 # DATA CLEANING
 # -------------------------------
 df = df.drop_duplicates()
 
-for col in ["Sales", "Cost", "Gross Profit"]:
-    if col in df.columns:
-        df[col] = pd.to_numeric(df[col], errors='coerce')
+for col in required_cols:
+    df[col] = pd.to_numeric(df[col], errors='coerce')
 
-df = df.dropna(subset=["Sales", "Cost", "Gross Profit"])
-
-# Derived columns
-df["Profit"] = df["Sales"] - df["Cost"]
-df["Margin %"] = (df["Profit"] / df["Sales"]) * 100
-
-# Convert date
-if "Order Date" in df.columns:
-    df["Order Date"] = pd.to_datetime(df["Order Date"], errors='coerce')
+df = df.dropna(subset=required_cols)
 
 # -------------------------------
-# SHOW CLEAN DATA (BEFORE FILTERS ✅)
+# SAFE CALCULATIONS
 # -------------------------------
-df_original = df.copy()
+df["profit"] = df["sales"] - df["cost"]
 
-st.subheader("📄 Dataset Preview(Before Filters)")
-st.dataframe(df_original, use_container_width=True)
+df["margin %"] = np.where(
+    df["sales"] != 0,
+    (df["profit"] / df["sales"]) * 100,
+    0
+)
+
+# Date conversion
+if "order date" in df.columns:
+    df["order date"] = pd.to_datetime(df["order date"], errors='coerce')
+
+# -------------------------------
+# ORIGINAL DATA VIEW
+# -------------------------------
+st.subheader("📄 Dataset Preview")
+st.dataframe(df, use_container_width=True)
 
 # -------------------------------
 # SIDEBAR FILTERS
@@ -65,68 +81,76 @@ st.dataframe(df_original, use_container_width=True)
 st.sidebar.header("🔍 Filters")
 
 # Date filter
-if "Order Date" in df.columns:
-    min_date = df["Order Date"].min()
-    max_date = df["Order Date"].max()
-    dates = st.sidebar.date_input(
-        "Select Date Range",
-        [min_date, max_date]
-    )
+if "order date" in df.columns:
+    min_date = df["order date"].min()
+    max_date = df["order date"].max()
 
-    start_date, end_date = min_date, max_date
+    dates = st.sidebar.date_input("Select Date Range", [min_date, max_date])
+
     if len(dates) == 2:
-        start_date, end_date = dates
-    df = df[
-        (df["Order Date"] >= pd.to_datetime(start_date)) &
-        (df["Order Date"] <= pd.to_datetime(end_date))
-    ]
+        df = df[
+            (df["order date"] >= pd.to_datetime(dates[0])) &
+            (df["order date"] <= pd.to_datetime(dates[1]))
+        ]
 
 # Division filter
-if "Division" in df.columns:
+if "division" in df.columns:
     division = st.sidebar.selectbox(
         "Select Division",
-        ["All"] + list(df["Division"].dropna().unique())
+        ["All"] + list(df["division"].dropna().unique())
     )
     if division != "All":
-        df = df[df["Division"] == division]
+        df = df[df["division"] == division]
 
-# Sales filter (ADDED ✅)
-min_val = df["Sales"].min()
-max_val = df["Sales"].max()
+# Sales filter
+min_sales = float(df["sales"].min())
+max_sales = float(df["sales"].max())
 
-if min_val == max_val:
-    st.sidebar.write("Only one sales value available:", min_val)
-    min_sales = min_val
-else:
-    min_sales = st.sidebar.slider(
-        "Select minimum sales",
-        float(min_val),
-        float(max_val),
-        float(min_val)
+if min_sales != max_sales:
+    selected_sales = st.sidebar.slider(
+        "Minimum Sales",
+        min_sales,
+        max_sales,
+        min_sales
     )
+    df = df[df["sales"] >= selected_sales]
 
 # Margin filter
-margin = st.sidebar.slider("Minimum Gross Margin (%)", 0.0, 100.0, 0.0)
-df = df[df["Margin %"] >= margin]
+margin = st.sidebar.slider("Minimum Margin (%)", 0.0, 100.0, 0.0)
+df = df[df["margin %"] >= margin]
 
-# Product search (FINAL FIXED ✅)
-product = st.sidebar.text_input("Search Product")
+# Product search
+if "product name" in df.columns:
+    product = st.sidebar.text_input("Search Product")
 
-if product:
-    search_words = product.lower().split()
-
-    def match_all(text):
-        text = str(text).lower()
-        return all(word in text for word in search_words)
-
-    df = df[df["Product Name"].apply(match_all)]
+    if product:
+        words = product.lower().split()
+        df = df[
+            df["product name"].astype(str).str.lower().apply(
+                lambda x: all(word in x for word in words)
+            )
+        ]
 
 # -------------------------------
-# SHOW FILTERED DATA
+# HANDLE EMPTY DATA AFTER FILTERS
+# -------------------------------
+if df.empty:
+    st.error("🚫 No data matches your filters. Try relaxing them.")
+    st.stop()
+
+# -------------------------------
+# RISK FLAG (SAFE)
+# -------------------------------
+if "margin %" in df.columns:
+    df["risk flag"] = np.where(df["margin %"] < 10, "High Risk", "Normal")
+else:
+    st.warning("⚠️ 'Margin %' not available. Risk flag skipped.")
+
+# -------------------------------
+# FILTERED DATA
 # -------------------------------
 st.subheader("📄 Filtered Data")
 st.dataframe(df, use_container_width=True)
-
 st.write("Rows after filter:", df.shape)
 
 # -------------------------------
@@ -136,99 +160,93 @@ st.subheader("📊 Key Metrics")
 
 c1, c2, c3 = st.columns(3)
 
-c1.metric("Total Sales", f"${df['Sales'].sum():,.0f}")
-c2.metric("Total Profit", f"${df['Profit'].sum():,.0f}")
-c3.metric("Avg Margin", f"{df['Margin %'].mean():.2f}%")
+c1.metric("Total Sales", f"${df['sales'].sum():,.0f}")
+c2.metric("Total Profit", f"${df['profit'].sum():,.0f}")
+c3.metric("Avg Margin", f"{df['margin %'].mean():.2f}%")
+
+# -------------------------------
+# MARGIN DISTRIBUTION
+# -------------------------------
+if "division" in df.columns:
+    st.subheader("📊 Margin Distribution by Division")
+    fig = px.box(df, x="division", y="margin %")
+    st.plotly_chart(fig, use_container_width=True)
 
 # -------------------------------
 # TOP PRODUCTS
 # -------------------------------
-st.subheader("🏆 Top Products by Profit")
+if "product name" in df.columns:
+    st.subheader("🏆 Top Products by Profit")
 
-product_profit = df.groupby("Product Name")["Gross Profit"].sum().sort_values(ascending=False)
+    product_profit = df.groupby("product name")["gross profit"].sum().sort_values(ascending=False)
 
-fig1 = px.bar(product_profit.head(10), title="Top 10 Products by Profit")
-st.plotly_chart(fig1, use_container_width=True)
+    fig = px.bar(product_profit.head(10))
+    st.plotly_chart(fig, use_container_width=True)
 
 # -------------------------------
 # DIVISION PERFORMANCE
 # -------------------------------
-st.subheader("🏢 Division Performance")
+if "division" in df.columns:
+    st.subheader("🏢 Division Performance")
 
-if "Division" in df.columns:
-    division_data = df.groupby("Division")[["Sales", "Gross Profit"]].sum().reset_index()
+    division_data = df.groupby("division")[["sales", "gross profit"]].sum().reset_index()
 
-    fig2 = px.bar(division_data,
-                  x="Division",
-                  y=["Sales", "Gross Profit"],
-                  barmode="group",
-                  title="Division Sales vs Profit")
+    fig = px.bar(
+        division_data,
+        x="division",
+        y=["sales", "gross profit"],
+        barmode="group"
+    )
 
-    st.plotly_chart(fig2, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True)
 
 # -------------------------------
 # COST VS SALES
 # -------------------------------
 st.subheader("📉 Cost vs Sales")
 
-color_col = "Division" if "Division" in df.columns else None
-
-fig3 = px.scatter(df,
-                  x="Sales",
-                  y="Cost",
-                  color=color_col,
-                  title="Sales vs Cost")
-
-st.plotly_chart(fig3, use_container_width=True)
-
-st.success(
-    "Insight: The scatter plot indicates a strong positive relationship between sales and cost. "
-    "This suggests a stable cost structure with minor inefficiencies."
+fig = px.scatter(
+    df,
+    x="sales",
+    y="cost",
+    color="division" if "division" in df.columns else None
 )
+
+st.plotly_chart(fig, use_container_width=True)
 
 # -------------------------------
 # PARETO ANALYSIS
 # -------------------------------
-st.subheader("📊 Pareto Analysis")
+if "product name" in df.columns:
+    st.subheader("📊 Pareto Analysis")
 
-pareto = df.groupby("Product Name")["Gross Profit"].sum().sort_values(ascending=False)
-pareto_pct = pareto / pareto.sum()
-cumulative = pareto_pct.cumsum()
+    pareto = df.groupby("product name")["gross profit"].sum().sort_values(ascending=False)
+    cumulative = (pareto / pareto.sum()).cumsum()
 
-pareto_df = pareto_pct.to_frame(name="Profit %")
-pareto_df["Cumulative %"] = cumulative
+    pareto_df = pd.DataFrame({
+        "profit %": pareto / pareto.sum(),
+        "cumulative %": cumulative
+    })
 
-fig4 = px.bar(pareto_df.head(10), y="Profit %", title="Top Products Contribution")
+    fig = px.bar(pareto_df.head(10), y="profit %")
+    fig.add_scatter(y=pareto_df.head(10)["cumulative %"], mode='lines+markers')
 
-fig4.add_scatter(y=pareto_df.head(10)["Cumulative %"],
-                 mode='lines+markers',
-                 name="Cumulative %")
-
-st.plotly_chart(fig4, use_container_width=True)
-
-top_80 = pareto_df[pareto_df["Cumulative %"] <= 0.8]
-st.success(f"👉 {len(top_80)} products generate ~80% of total profit")
+    st.plotly_chart(fig, use_container_width=True)
 
 # -------------------------------
 # MACHINE LEARNING
 # -------------------------------
 st.subheader("🤖 Profit Prediction")
 
-X = df[["Sales"]]
-y = df["Profit"]
+X = df[["sales"]]
+y = df["profit"]
 
 model = LinearRegression().fit(X, y)
 
 target_sales = st.number_input("Enter Target Sales", value=100.0)
-predicted_profit = model.predict(np.array([[target_sales]]))[0]
+predicted_profit = model.predict([[target_sales]])[0]
 
 st.info(f"If Sales = ${target_sales:,.2f}, Estimated Profit = ${predicted_profit:,.2f}")
-
-fig5 = px.scatter(df, x="Sales", y="Profit", title="ML Trend Line")
-fig5.add_scatter(x=df["Sales"], y=model.predict(X),
-                 mode='lines', name="Trend")
-
-st.plotly_chart(fig5, use_container_width=True)
 
 # -------------------------------
 # DOWNLOAD
