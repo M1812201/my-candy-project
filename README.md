@@ -35,7 +35,7 @@ It helps analyze sales, profit, and margin using interactive charts and filters.
 https://my-candy-project.streamlit.app/
 
 ## 📂 Dataset
-A sample dataset is included (sample_data.csv) to test the dashboard.
+A sample dataset is included (sample_data.xlsx) to test the dashboard.
 
 ## 👩‍💻 Author
 Akshata Gurav
