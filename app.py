@@ -238,7 +238,7 @@ if "order date" in df.columns:
 # -------------------------------
 st.subheader("🤖 Profit Prediction")
 
-st.info("Using Linear Regression to predict Profit based on Sales.")
+st.info("This model uses Linear Regression to estimate profit based on sales data.")
 
 X = df[["sales"]]
 y = df["profit"]
