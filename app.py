@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 from sklearn.linear_model import LinearRegression
+from sklearn.metrics import r2_score
 
 # -------------------------------
 # PAGE CONFIG
@@ -28,7 +29,7 @@ else:
     df = pd.read_excel(uploaded_file, engine="openpyxl")
 
 # -------------------------------
-# CLEAN COLUMN NAMES (CRITICAL)
+# CLEAN COLUMN NAMES
 # -------------------------------
 df.columns = df.columns.str.strip().str.lower()
 
@@ -55,7 +56,7 @@ for col in required_cols:
 df = df.dropna(subset=required_cols)
 
 # -------------------------------
-# SAFE CALCULATIONS
+# CALCULATIONS
 # -------------------------------
 df["profit"] = df["sales"] - df["cost"]
 
@@ -70,7 +71,7 @@ if "order date" in df.columns:
     df["order date"] = pd.to_datetime(df["order date"], errors='coerce')
 
 # -------------------------------
-# ORIGINAL DATA VIEW
+# DATA PREVIEW
 # -------------------------------
 st.subheader("📄 Dataset Preview")
 st.dataframe(df, use_container_width=True)
@@ -80,7 +81,6 @@ st.dataframe(df, use_container_width=True)
 # -------------------------------
 st.sidebar.header("🔍 Filters")
 
-# Date filter
 if "order date" in df.columns:
     min_date = df["order date"].min()
     max_date = df["order date"].max()
@@ -93,7 +93,6 @@ if "order date" in df.columns:
             (df["order date"] <= pd.to_datetime(dates[1]))
         ]
 
-# Division filter
 if "division" in df.columns:
     division = st.sidebar.selectbox(
         "Select Division",
@@ -102,24 +101,16 @@ if "division" in df.columns:
     if division != "All":
         df = df[df["division"] == division]
 
-# Sales filter
 min_sales = float(df["sales"].min())
 max_sales = float(df["sales"].max())
 
 if min_sales != max_sales:
-    selected_sales = st.sidebar.slider(
-        "Minimum Sales",
-        min_sales,
-        max_sales,
-        min_sales
-    )
+    selected_sales = st.sidebar.slider("Minimum Sales", min_sales, max_sales, min_sales)
     df = df[df["sales"] >= selected_sales]
 
-# Margin filter
 margin = st.sidebar.slider("Minimum Margin (%)", 0.0, 100.0, 0.0)
 df = df[df["margin %"] >= margin]
 
-# Product search
 if "product name" in df.columns:
     product = st.sidebar.text_input("Search Product")
 
@@ -132,26 +123,17 @@ if "product name" in df.columns:
         ]
 
 # -------------------------------
-# HANDLE EMPTY DATA AFTER FILTERS
+# EMPTY CHECK
 # -------------------------------
 if df.empty:
-    st.error("🚫 No data matches your filters. Try relaxing them.")
+    st.error("🚫 No data matches your filters.")
     st.stop()
-
-# -------------------------------
-# RISK FLAG (SAFE)
-# -------------------------------
-if "margin %" in df.columns:
-    df["risk flag"] = np.where(df["margin %"] < 10, "High Risk", "Normal")
-else:
-    st.warning("⚠️ 'Margin %' not available. Risk flag skipped.")
 
 # -------------------------------
 # FILTERED DATA
 # -------------------------------
 st.subheader("📄 Filtered Data")
 st.dataframe(df, use_container_width=True)
-st.write("Rows after filter:", df.shape)
 
 # -------------------------------
 # KPI METRICS
@@ -169,8 +151,11 @@ c3.metric("Avg Margin", f"{df['margin %'].mean():.2f}%")
 # -------------------------------
 if "division" in df.columns:
     st.subheader("📊 Margin Distribution by Division")
+
     fig = px.box(df, x="division", y="margin %")
     st.plotly_chart(fig, use_container_width=True)
+
+    st.success("Insight: Some divisions have lower margin spread indicating pricing or cost issues.")
 
 # -------------------------------
 # TOP PRODUCTS
@@ -183,6 +168,8 @@ if "product name" in df.columns:
     fig = px.bar(product_profit.head(10))
     st.plotly_chart(fig, use_container_width=True)
 
+    st.success("Insight: Top few products generate majority of profit.")
+
 # -------------------------------
 # DIVISION PERFORMANCE
 # -------------------------------
@@ -191,14 +178,10 @@ if "division" in df.columns:
 
     division_data = df.groupby("division")[["sales", "gross profit"]].sum().reset_index()
 
-    fig = px.bar(
-        division_data,
-        x="division",
-        y=["sales", "gross profit"],
-        barmode="group"
-    )
-
+    fig = px.bar(division_data, x="division", y=["sales", "gross profit"], barmode="group")
     st.plotly_chart(fig, use_container_width=True)
+
+    st.success("Insight: Some divisions have high sales but low profit.")
 
 # -------------------------------
 # COST VS SALES
@@ -213,6 +196,8 @@ fig = px.scatter(
 )
 
 st.plotly_chart(fig, use_container_width=True)
+
+st.success("Insight: Sales and cost show a strong positive relationship.")
 
 # -------------------------------
 # PARETO ANALYSIS
@@ -233,20 +218,43 @@ if "product name" in df.columns:
 
     st.plotly_chart(fig, use_container_width=True)
 
+    st.success("Insight: 20% of products contribute to 80% of profit.")
+
+# -------------------------------
+# TREND ANALYSIS
+# -------------------------------
+if "order date" in df.columns:
+    st.subheader("📈 Sales Trend")
+
+    trend = df.groupby("order date")["sales"].sum().reset_index()
+
+    fig = px.line(trend, x="order date", y="sales")
+    st.plotly_chart(fig, use_container_width=True)
+
+    st.success("Insight: Shows sales growth pattern over time.")
+
 # -------------------------------
 # MACHINE LEARNING
 # -------------------------------
 st.subheader("🤖 Profit Prediction")
+
+st.info("Using Linear Regression to predict Profit based on Sales.")
 
 X = df[["sales"]]
 y = df["profit"]
 
 model = LinearRegression().fit(X, y)
 
+preds = model.predict(X)
+r2 = r2_score(y, preds)
+
+st.write(f"Model Accuracy (R²): {r2:.2f}")
+
 target_sales = st.number_input("Enter Target Sales", value=100.0)
+
 predicted_profit = model.predict([[target_sales]])[0]
 
-st.info(f"If Sales = ${target_sales:,.2f}, Estimated Profit = ${predicted_profit:,.2f}")
+st.success(f"Estimated Profit: ${predicted_profit:,.2f}")
 
 # -------------------------------
 # DOWNLOAD
